@@ -1,7 +1,6 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -36,17 +35,19 @@ android {
         targetCompatibility = JavaVersion.VERSION_1_8
     }
 
-    kotlin {
-        compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8)
-        }
+    kotlinOptions {
+        jvmTarget = "1.8"
     }
 
     buildFeatures {
         compose = true
     }
 
-    packaging {
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.8"
+    }
+
+    packagingOptions {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
@@ -54,8 +55,8 @@ android {
 }
 
 dependencies {
-    // Core Android
-    implementation("androidx.core:core-ktx:1.15.0")
+    // Core Android (using 1.13.1 for API 34 compatibility - 1.15.0 requires API 35)
+    implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.activity:activity-compose:1.9.3")
 
@@ -70,8 +71,8 @@ dependencies {
     // ViewModel
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
 
-    // Coroutines
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.0")
+    // Coroutines (1.9.0 for Kotlin 1.9.22 compatibility - 1.10.0 requires Kotlin 2.0+)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
     // Gson for JSON serialization
     implementation("com.google.code.gson:gson:2.11.0")

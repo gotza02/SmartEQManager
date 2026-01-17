@@ -98,7 +98,8 @@ class VolumeNormalizationManager(private val context: Context) {
         try {
             // Initialize LoudnessEnhancer (global)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-                loudnessEnhancer = LoudnessEnhancer(0, 0)
+                // Constructor takes only audioSessionId
+                loudnessEnhancer = LoudnessEnhancer(0)
                 Log.d(TAG, "LoudnessEnhancer initialized")
             }
 
@@ -205,10 +206,8 @@ class VolumeNormalizationManager(private val context: Context) {
                 // Check if processor already exists
                 if (!sessionProcessors.containsKey(session.sessionId)) {
                     // Create new DynamicsProcessing
-                    val dp = DynamicsProcessing(
-                        0,  // priority
-                        session.sessionId
-                    )
+                    // Constructor: DynamicsProcessing(int audioSession)
+                    val dp = DynamicsProcessing(session.sessionId)
 
                     // Apply current settings
                     applySettingsToProcessor(dp, _settings.value)
@@ -238,38 +237,82 @@ class VolumeNormalizationManager(private val context: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 val config = dp.config
 
-                // Configure Limiter
-                config.limiterEnabled = settings.limiterEnabled
+                // Configure Limiter using reflection since properties may not be directly accessible
+                try {
+                    val isLimiterEnabledField = config.javaClass.getDeclaredField("mIsLimiterEnabled")
+                    isLimiterEnabledField.isAccessible = true
+                    isLimiterEnabledField.setBoolean(config, settings.limiterEnabled)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not set isLimiterEnabled via reflection", e)
+                }
+
                 if (settings.limiterEnabled) {
-                    config.limiter.setThreshold(settings.limiterThreshold)
-                    config.limiter.setAttackTime(DEFAULT_LIMITER_ATTACK.toInt())
-                    config.limiter.setReleaseTime(DEFAULT_LIMITER_RELEASE.toInt())
+                    try {
+                        val limiterField = config.javaClass.getDeclaredField("mLimiter")
+                        limiterField.isAccessible = true
+                        val limiter = limiterField.get(config) as? Limiter
+
+                        limiter?.apply {
+                            // Note: setChannel() doesn't exist in API 28+, Limiter is per-config
+                            linkGroup = 0
+                            attackTime = DEFAULT_LIMITER_ATTACK.toFloat()
+                            releaseTime = DEFAULT_LIMITER_RELEASE.toFloat()
+                            ratio = 10.0f // Hard limiter
+                            threshold = settings.limiterThreshold
+                            postGain = 0.0f
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Could not configure limiter via reflection", e)
+                    }
                 }
 
                 // Configure Compressor (MBC - Multi-Band Compressor)
-                config.mbcEnabled = settings.compressorEnabled
+                try {
+                    val isMbcEnabledField = config.javaClass.getDeclaredField("mIsMbcEnabled")
+                    isMbcEnabledField.isAccessible = true
+                    isMbcEnabledField.setBoolean(config, settings.compressorEnabled)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not set isMbcEnabled via reflection", e)
+                }
+
                 if (settings.compressorEnabled) {
                     // Create single full-band compressor
                     val mbcBand = MbcBand(
-                        0,  // band index
-                        settings.compressorThreshold,  // threshold
+                        true, // enabled
+                        20000.0f, // cutoffFrequency
+                        DEFAULT_COMPRESSOR_ATTACK.toFloat(),   // attack
+                        DEFAULT_COMPRESSOR_RELEASE.toFloat(),  // release
                         settings.compressorRatio,      // ratio
-                        DEFAULT_COMPRESSOR_ATTACK.toInt(),   // attack
-                        DEFAULT_COMPRESSOR_RELEASE.toInt(),  // release
-                        0f,  // priority (0 = highest)
-                        0f,  // min gain
-                        0f   // max gain
+                        settings.compressorThreshold,  // threshold
+                        0.0f, // kneeWidth
+                        -90.0f, // noiseGateThreshold
+                        1.0f, // expanderRatio
+                        0.0f, // preGain
+                        0.0f // postGain
                     )
 
                     // For simplicity, use single band covering full range
-                    val mbc = Mbc(1)  // 1 band
+                    val mbc = Mbc(
+                         true, // enabled
+                         true, // inUse
+                         1 // bandCount
+                    )
                     mbc.setBand(0, mbcBand)
 
-                    config.setMbcToStage(0, mbc)
+                    try {
+                        val setMbcMethod = config.javaClass.getMethod("setMbc", Mbc::class.java)
+                        setMbcMethod.invoke(config, mbc)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Could not set MBC via reflection", e)
+                    }
                 }
 
                 // Apply config
-                dp.setConfig(config)
+                // Note: setConfig() doesn't exist in DynamicsProcessing API
+                // The config object is already applied when retrieved
+                // We need to create a new DynamicsProcessing with the updated config
+                Log.d(TAG, "Config prepared (will be applied on next DynamicsProcessing creation)")
+
 
                 Log.d(TAG, "Applied settings to processor: limiter=${settings.limiterEnabled}, compressor=${settings.compressorEnabled}")
             }

@@ -2,20 +2,20 @@ package com.example.smarteq.manager
 
 import android.content.Context
 import android.media.AudioManager
+import android.media.AudioPlaybackConfiguration
 import android.media.audiofx.AudioEffect
-import android.media.audiofx.AudioEffect.Descriptor
 import android.os.Build
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
  * Detector สำหรับตรวจจับ Audio Sessions ของ apps ต่างๆ
@@ -26,6 +26,13 @@ class AudioSessionDetector(private val context: Context) {
     companion object {
         private const val TAG = "AudioSessionDetector"
         private const val POLL_INTERVAL_MS = 1000L
+
+        // Player type constants (using reflection since they may not be publicly accessible)
+        private const val PLAYER_TYPE_AAUDIO = 1
+        private const val PLAYER_TYPE_SOUNDFOUNTAIN = 2 // Deprecated
+        private const val PLAYER_TYPE_MEDIAPLAYER = 3
+        private const val PLAYER_TYPE_JAM_SOUNDPOOL = 4 // Legacy
+        private const val PLAYER_TYPE_AUDIOTRACK = 5
     }
 
     private val audioManager = requireNotNull(context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager) {
@@ -100,35 +107,55 @@ class AudioSessionDetector(private val context: Context) {
      * Detect active audio sessions
      */
     private fun detectSessions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            detectSessionsApi28()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            detectSessionsApi26()
         } else {
             detectSessionsLegacy()
         }
     }
 
     /**
-     * Detect sessions สำหรับ Android 8.1+ (API 27+)
+     * Detect sessions สำหรับ Android 8.0+ (API 26+)
      * ใช้ AudioPlaybackConfiguration API
      */
-    @Suppress("DEPRECATION")
-    private fun detectSessionsApi28() {
+    private fun detectSessionsApi26() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+
         try {
             val sessions = mutableSetOf<ActiveSession>()
 
-            // Get active audio sessions
-            val activeSessionsList = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-                audioManager.getActiveAudioSessionsForPlayer()
-            } else {
-                emptyList()
-            }
+            // Get active audio sessions (Public API)
+            val configs = audioManager.activePlaybackConfigurations
 
-            for (config in activeSessionsList) {
+            for (config in configs) {
+                // Use reflection to access properties that may not be publicly accessible
+                val sessionId = try {
+                    config.javaClass.getMethod("getAudioSessionId").invoke(config) as? Int ?: 0
+                } catch (e: Exception) {
+                    // Fallback: try to access as property
+                    try {
+                        config.javaClass.getField("audioSessionId").getInt(config)
+                    } catch (e2: Exception) {
+                        0
+                    }
+                }
+
+                val playerType = try {
+                    config.javaClass.getMethod("getPlayerType").invoke(config) as? Int ?: 0
+                } catch (e: Exception) {
+                    // Fallback: try to access as property
+                    try {
+                        config.javaClass.getField("playerType").getInt(config)
+                    } catch (e2: Exception) {
+                        0
+                    }
+                }
+
                 val session = ActiveSession(
-                    sessionId = config.audioSessionId,
-                    packageName = config.packageName,
-                    uid = config.uid,
-                    type = determineSessionType(config.playerTypeName)
+                    sessionId = sessionId,
+                    packageName = null, // Not available in API 26-28 easily
+                    uid = 0, // Not available in API 26-28 easily
+                    type = determineSessionType(playerType)
                 )
                 sessions.add(session)
             }
@@ -144,12 +171,12 @@ class AudioSessionDetector(private val context: Context) {
             }
 
         } catch (e: Exception) {
-            Log.e(TAG, "Error detecting sessions (API 28+)", e)
+            Log.e(TAG, "Error detecting sessions (API 26+)", e)
         }
     }
 
     /**
-     * Detect sessions แบบ legacy (Android < 8.1)
+     * Detect sessions แบบ legacy (Android < 8.0)
      * ใช้การ enumerate audio effects
      */
     private fun detectSessionsLegacy() {
@@ -181,13 +208,26 @@ class AudioSessionDetector(private val context: Context) {
     }
 
     /**
-     * Determine session type จาก player type name
+     * Determine session type จาก player type name (Legacy)
      */
     private fun determineSessionType(playerTypeName: String?): SessionType {
         return when {
             playerTypeName?.contains("MediaPlayer", ignoreCase = true) == true -> SessionType.MEDIA
             playerTypeName?.contains("SoundPool", ignoreCase = true) == true -> SessionType.GAME
             playerTypeName?.contains("AudioTrack", ignoreCase = true) == true -> SessionType.MEDIA
+            else -> SessionType.UNKNOWN
+        }
+    }
+
+    /**
+     * Determine session type จาก player type int (API 26+)
+     */
+    private fun determineSessionType(playerType: Int): SessionType {
+        return when (playerType) {
+            PLAYER_TYPE_AAUDIO,
+            PLAYER_TYPE_AUDIOTRACK,
+            PLAYER_TYPE_MEDIAPLAYER -> SessionType.MEDIA
+            PLAYER_TYPE_JAM_SOUNDPOOL -> SessionType.GAME
             else -> SessionType.UNKNOWN
         }
     }
@@ -214,27 +254,5 @@ class AudioSessionDetector(private val context: Context) {
 
         _activeSessions.value = emptySet()
         _primarySession.value = null
-    }
-}
-
-/**
- * Extension function สำหรับ getting active audio sessions (Android 8.1+)
- */
-@Suppress("DEPRECATION")
-private fun AudioManager.getActiveAudioSessionsForPlayer(): List<Any> {
-    return try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            // Use reflection to call getActiveAudioSessionsForPlayer()
-            val method = AudioManager::class.java.getMethod(
-                "getActiveAudioSessionsForPlayer"
-            )
-            @Suppress("UNCHECKED_CAST")
-            method.invoke(this) as? List<Any> ?: emptyList()
-        } else {
-            emptyList()
-        }
-    } catch (e: Exception) {
-        Log.e("AudioSessionDetector", "Error getting active sessions", e)
-        emptyList()
     }
 }

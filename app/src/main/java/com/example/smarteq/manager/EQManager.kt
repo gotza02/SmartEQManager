@@ -79,8 +79,8 @@ class EQManager(private val context: Context) {
                 // แสดงรายละเอียด bands
                 for (i in 0 until bandCount) {
                     val freq = equalizer?.getCenterFreq(i.toShort()) ?: 0
-                    val range = equalizer?.getBandLevelRange() ?: intArrayOf(0, 0)
-                    Log.d(TAG, "Band $i: ${freq / 1000}Hz, range: ${range[0] / 100}dB to ${range[1] / 100}dB")
+                    val range = equalizer?.getBandLevelRange() ?: shortArrayOf(0, 0)
+                    Log.d(TAG, "Band $i: ${freq / 1000}Hz, range: ${range[0].toInt() / 100}dB to ${range[1].toInt() / 100}dB")
                 }
             }
         } catch (e: Exception) {
@@ -161,7 +161,7 @@ class EQManager(private val context: Context) {
      * รับจำนวน bands ที่รองรับ
      */
     fun getBandCount(): Int {
-        return equalizer?.numberOfBands ?: 0
+        return equalizer?.numberOfBands?.toInt() ?: 0
     }
 
     /**
@@ -180,8 +180,8 @@ class EQManager(private val context: Context) {
      * @return Pair<min, max> ในหน่วย millibel
      */
     fun getBandLevelRange(): Pair<Int, Int> {
-        val range = equalizer?.getBandLevelRange() ?: intArrayOf(-1500, 1500)
-        return Pair(range[0], range[1])
+        val range = equalizer?.getBandLevelRange() ?: shortArrayOf(-1500, 1500)
+        return Pair(range[0].toInt(), range[1].toInt())
     }
 
     /**

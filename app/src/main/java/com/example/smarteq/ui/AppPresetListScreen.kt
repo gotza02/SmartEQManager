@@ -54,8 +54,12 @@ fun AppPresetListScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(appConfigs) { config ->
+                // Resolve preset name here
+                val presetName = presetManager.getPresetById(config.presetId)?.name ?: "Unknown"
+                
                 AppPresetItem(
                     config = config,
+                    presetName = presetName,
                     onConfigUpdate = { updated ->
                         presetManager.updateAppConfig(updated)
                     }
@@ -71,6 +75,7 @@ fun AppPresetListScreen(
 @Composable
 fun AppPresetItem(
     config: AppConfig,
+    presetName: String,
     onConfigUpdate: (AppConfig) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -126,7 +131,7 @@ fun AppPresetItem(
                 TextButton(
                     onClick = { expanded = true }
                 ) {
-                    Text(presetManager.getPresetById(config.presetId)?.name ?: "Unknown")
+                    Text(presetName)
                     Icon(
                         imageVector = if (expanded) Icons.Default.Circle else Icons.Default.Circle,
                         contentDescription = null,
