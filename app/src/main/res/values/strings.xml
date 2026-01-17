@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Smart EQ Manager</string>
+    <string name="accessibility_service_description">
+        Smart EQ Manager uses accessibility service to detect active apps and automatically switch EQ presets.
+        This service runs in the background to provide seamless EQ switching when you change apps.
+    </string>
+</resources>
